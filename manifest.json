@@ -1,17 +1,16 @@
 {
 	"manifest_version": 2,
 
-	"name": "test",
-	"description": "Testing",
-	"version": "1.0",
+	"name": "node-dev-livereload",
+	"description": "Automaticaly reload browser on node-dev restart",
+	"version": "0.1",
 
 	"permissions": [
-		"https://secure.flickr.com/",
 		"tabs"
 	],
 	"browser_action": {
 		"default_icon": "icons/off.png",
-		"default_title": "Start Testing"
+		"default_title": "node-dev-livereload"
 	},
 	"background": {
 		"scripts": ["background.js"]

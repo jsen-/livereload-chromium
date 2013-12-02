@@ -13,6 +13,8 @@ function inherits(construct, superClass) {
     return construct;
 }
 
+
+
 function EventEmitter() {
     this._events = {};
 }
@@ -39,44 +41,48 @@ EventEmitter.prototype.fire = function (eventName) {
 };
 
 
+
 function Connector(url) {
     Connector._super.call(this);
     this._url = url;
-    this.init();
 }
 inherits(Connector, EventEmitter);
 Connector.prototype._url = '';
 Connector.prototype._connected = false;
-Connector.prototype.init = function() {
-    if(this._connected) {
-        this.close();
+Connector.prototype.connect = function() {
+    if(this._ws) {
+        this.disconnect();
     }
     var ws = this._ws = new WebSocket(this._url);
     var self = this;
     ws.onopen = function () {
+        log('onopen');
         ws.send(JSON.stringify({
             command: 'hello',
             protocols: [PROTOCOL]
         }));
     };
     ws.onclose = function (e) {
-        self._connected = false;
-        self._ws = null;
-        self.fire('disconnect', e);
+        log('onclose ' + e);
+        self.disconnect(e);
     };
     ws.onmessage = function(msg) {
+        log('onmessage ' + msg)
         if (!self._connected) {
             self.handleHandshake(msg);
         } else {
             self.handleMessage(msg);
         }
     };
+    ws.onerror = function(err) {
+      log('onerror ' + err);
+    };
 };
 Connector.prototype.handleHandshake = function (msg) {
     var msg = this.parseMessage(msg);
     if (msg && msg.command === 'hello' && Object.prototype.toString.call(msg.protocols) === '[object Array]' && msg.protocols.indexOf(PROTOCOL) !== -1) {
         this._connected = true;
-        this.fire('connected');
+        this.fire('connect');
     }
 };
 Connector.prototype.handleMessage = function (message) {
@@ -86,47 +92,45 @@ Connector.prototype.handleMessage = function (message) {
     }
 };
 Connector.prototype.parseMessage = function (msg) {
-    console.log('parsing message:' + msg.data)
+    log('parsing message:' + msg.data)
     try {
         return JSON.parse(msg.data);
     } catch (ex) { }
 };
-Connector.prototype.close = function () {
-    if (this._ws) {
-        this._ws.onclose = null;
-        this._ws.close();
+Connector.prototype.disconnect = function (e) {
+    this._connected = false;
+    var ws = this._ws;
+    if (ws) {
+        ws.close();
+        ws.onopen = ws.onclose = ws.onmessage = ws.onerror = null;
+        this.fire('disconnect', e);
         this._ws = null;
-        this.fire('close');
     }
 };
 Connector.prototype.toggle = function () {
-    this._connected
-    ? this.close()
-    : this.init();
+    this._ws
+    ? this.disconnect()
+    : this.connect();
 };
-
-
-
-
-
 
 
 function TabManager() {
     this._connectors = {};
-    //chrome.tab.onActivated.addListener(function (activeInfo) {
-    //    var tabId = activeInfo.tabId;
-    //    var windowId = activeInfo.windowId;
-    //});
+//     chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
+//         if(changeInfo.status) {
+//             if()
+//         }
+//     });
 }
 TabManager.prototype._connectors = null;
-TabManager.prototype.toggleCurrent = function () {
-    var self = this;
-    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-        if (tabs[0]) {
-            self.toggleTab(tabs[0]);
-        }
-    });
-};
+// TabManager.prototype.toggleCurrent = function () {
+//     var self = this;
+//     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+//         if (tabs[0]) {
+//             self.toggleTab(tabs[0]);
+//         }
+//     });
+// };
 TabManager.prototype.toggleTab = function (tab) {
     var self = this;
     var tabId = tab.id;
@@ -147,16 +151,10 @@ TabManager.prototype.toggleTab = function (tab) {
         connector.on('connect', function () {
             log(tabId + ' connect');
             chrome.browserAction.setIcon({ path: "icons/on.png", tabId: tabId });
-            chrome.browserAction.setBadgeText({
-                "text": "on"
-            });
         });
         connector.on('disconnect', function (e) {
-            log(tabId + ' close');
+            log(tabId + ' disconnect');
             chrome.browserAction.setIcon({ path: "icons/off.png", tabId: tabId });
-            chrome.browserAction.setBadgeText({
-                "text": "off"
-            });
         });
         connector.on('reload', function (message) {
             log(tabId + ' message' + message);
@@ -169,20 +167,20 @@ TabManager.prototype.toggleTab = function (tab) {
         });
         chrome.tabs.onRemoved.addListener(function (tabId, removeInfo) {
             if (hasOwn(self._connectors, tabId)) {
-                self._connectors[tabId].close();
+                self._connectors[tabId].disconnect();
                 delete self._connectors[tabId];
             }
         });
+        chrome.browserAction.setIcon({ path: "icons/connecting.png", tabId: tabId });
     }
     connector.toggle();
 };
 
-
 // lazy init
 var tabMgr;
-chrome.browserAction.onClicked.addListener(function () {
+chrome.browserAction.onClicked.addListener(function (tab) {
     if (tabMgr === undefined) {
         tabMgr = new TabManager();
     }
-    tabMgr.toggleCurrent();
+    tabMgr.toggleTab(tab);
 });

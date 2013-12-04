@@ -1,4 +1,5 @@
 'use strict';
+
 var PROTOCOL = 'http://livereload.com/protocols/official-7';
 var RE_URL = /^(?:([a-z]+)\:\/\/)?([a-z-0-9]+(?:\.[a-z-0-9]+)*)/;
 function log() {
@@ -12,8 +13,6 @@ function inherits(construct, superClass) {
     construct._super = superClass;
     return construct;
 }
-
-
 
 function EventEmitter() {
     this._events = {};
@@ -54,7 +53,7 @@ Connector.prototype.connect = function() {
         this.disconnect();
     }
     var ws = this._ws = new WebSocket(this._url);
-    var self = this;
+
     ws.onopen = function () {
         log('onopen');
         ws.send(JSON.stringify({
@@ -62,20 +61,23 @@ Connector.prototype.connect = function() {
             protocols: [PROTOCOL]
         }));
     };
+
     ws.onclose = function (e) {
-        log('onclose ' + e);
-        self.disconnect(e);
-    };
+        log('onclose ', e);
+        this.disconnect(e);
+    }.bind(this);
+
     ws.onmessage = function(msg) {
-        log('onmessage ' + msg)
-        if (!self._connected) {
-            self.handleHandshake(msg);
+        log('onmessage ', msg)
+        if (!this._connected) {
+            this.handleHandshake(msg);
         } else {
-            self.handleMessage(msg);
+            this.handleMessage(msg);
         }
-    };
+    }.bind(this);
+
     ws.onerror = function(err) {
-      log('onerror ' + err);
+      log('onerror ', err);
     };
 };
 Connector.prototype.handleHandshake = function (msg) {
@@ -92,7 +94,7 @@ Connector.prototype.handleMessage = function (message) {
     }
 };
 Connector.prototype.parseMessage = function (msg) {
-    log('parsing message:' + msg.data)
+    log('parsing message:', msg.data);
     try {
         return JSON.parse(msg.data);
     } catch (ex) { }
@@ -103,8 +105,8 @@ Connector.prototype.disconnect = function (e) {
     if (ws) {
         ws.close();
         ws.onopen = ws.onclose = ws.onmessage = ws.onerror = null;
-        this.fire('disconnect', e);
         this._ws = null;
+        this.fire('disconnect', e);
     }
 };
 Connector.prototype.toggle = function () {
@@ -114,66 +116,62 @@ Connector.prototype.toggle = function () {
 };
 
 
+
+
+
+
+
+
+
 function TabManager() {
     this._connectors = {};
-//     chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
-//         if(changeInfo.status) {
-//             if()
-//         }
-//     });
+    chrome.tabs.onRemoved.addListener(this.removeTab.bind(this));
 }
 TabManager.prototype._connectors = null;
-// TabManager.prototype.toggleCurrent = function () {
-//     var self = this;
-//     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-//         if (tabs[0]) {
-//             self.toggleTab(tabs[0]);
-//         }
-//     });
-// };
+
 TabManager.prototype.toggleTab = function (tab) {
-    var self = this;
+    var tabId = tab.id;
+    (this._connectors[tabId] || (this._connectors[tabId] = this.createConnector(tab))).toggle();
+};
+
+TabManager.prototype.createConnector = function(tab) {
     var tabId = tab.id;
     var tabUrl = tab.url;
-    var connector = this._connectors[tabId];
-    if (connector === undefined) {
-        var matches = RE_URL.exec(tabUrl);
-        if(matches === null) {
-            return;
-        }
-        var domain = matches[2];
-        var port = 35729;
-        var path = '/livereload'; // make sure it starts with '/'
-        var url = 'ws://' + domain + ':' + port + path;
-        log(tabId + ' ' + url);
-
-        connector = self._connectors[tabId] = new Connector(url);
-        connector.on('connect', function () {
-            log(tabId + ' connect');
-            chrome.browserAction.setIcon({ path: "icons/on.png", tabId: tabId });
-        });
-        connector.on('disconnect', function (e) {
-            log(tabId + ' disconnect');
-            chrome.browserAction.setIcon({ path: "icons/off.png", tabId: tabId });
-        });
-        connector.on('reload', function (message) {
-            log(tabId + ' message' + message);
-            var reloadProperties = {
-                bypassCache: false
-            };
-            chrome.tabs.reload(tabId, reloadProperties, function () {
-                console.log('reloaded');
-            });
-        });
-        chrome.tabs.onRemoved.addListener(function (tabId, removeInfo) {
-            if (hasOwn(self._connectors, tabId)) {
-                self._connectors[tabId].disconnect();
-                delete self._connectors[tabId];
-            }
-        });
-        chrome.browserAction.setIcon({ path: "icons/connecting.png", tabId: tabId });
+    var matches = RE_URL.exec(tabUrl);
+    if(matches === null) {
+        return;
     }
-    connector.toggle();
+    var domain = matches[2];
+    var port = 35729;
+    var path = '/livereload'; // make sure it starts with '/'
+    var url = 'ws://' + domain + ':' + port + path;
+    chrome.browserAction.setIcon({ path: "icons/connecting.png", tabId: tabId });
+    var connector = new Connector(url);
+    connector.on('connect', function () {
+        log(tabId + ' connect');
+        chrome.browserAction.setIcon({ path: "icons/on.png", tabId: tabId });
+    });
+    connector.on('disconnect', function (e) {
+        log(tabId + ' disconnect');
+        chrome.browserAction.setIcon({ path: "icons/off.png", tabId: tabId });
+        this.removeTab(tabId);
+    }.bind(this));
+    connector.on('reload', function (message) {
+        log(tabId + ' message' + message);
+        var reloadProperties = {
+            bypassCache: false
+        };
+        chrome.tabs.reload(tabId, reloadProperties, function () {
+            console.log('reloaded');
+        });
+    });
+    return connector;
+};
+TabManager.prototype.removeTab = function(tabId) {
+    if (hasOwn(this._connectors, tabId)) {
+        this._connectors[tabId].disconnect();
+        delete this._connectors[tabId];
+    }
 };
 
 // lazy init

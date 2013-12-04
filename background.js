@@ -114,18 +114,31 @@ Connector.prototype.toggle = function () {
     ? this.disconnect()
     : this.connect();
 };
+Connector.prototype.isConnected = function() {
+    return this._connected;
+};
 
 
 
 
 
 
-
-
+function setConnected(tabId, url) {
+    chrome.browserAction.setIcon({ path: "icons/on.png", tabId: tabId });
+    chrome.browserAction.setTitle({ title: "Connected to " + url, tabId: tabId});
+}
 
 function TabManager() {
     this._connectors = {};
     chrome.tabs.onRemoved.addListener(this.removeTab.bind(this));
+    chrome.tabs.onUpdated.addListener(function(tabId, changeInfo) {
+        if(changeInfo.status === 'complete') {
+            var connector = this._connectors[tabId];
+            if(connector && connector.isConnected()) {
+                setConnected(tabId);
+            }
+        }
+    }.bind(this));
 }
 TabManager.prototype._connectors = null;
 
@@ -146,14 +159,16 @@ TabManager.prototype.createConnector = function(tab) {
     var path = '/livereload'; // make sure it starts with '/'
     var url = 'ws://' + domain + ':' + port + path;
     chrome.browserAction.setIcon({ path: "icons/connecting.png", tabId: tabId });
+    chrome.browserAction.setTitle({ title: "Connecting...", tabId: tabId});
     var connector = new Connector(url);
     connector.on('connect', function () {
         log(tabId + ' connect');
-        chrome.browserAction.setIcon({ path: "icons/on.png", tabId: tabId });
+        setConnected(tabId, url);
     });
     connector.on('disconnect', function (e) {
         log(tabId + ' disconnect');
         chrome.browserAction.setIcon({ path: "icons/off.png", tabId: tabId });
+        chrome.browserAction.setTitle({ title: "Disconnected from " + url, tabId: tabId});
         this.removeTab(tabId);
     }.bind(this));
     connector.on('reload', function (message) {
@@ -173,6 +188,8 @@ TabManager.prototype.removeTab = function(tabId) {
         delete this._connectors[tabId];
     }
 };
+
+
 
 // lazy init
 var tabMgr;
